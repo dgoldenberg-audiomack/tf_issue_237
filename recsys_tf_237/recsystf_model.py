@@ -10,31 +10,6 @@ import tensorflow_recommenders as tfrs
 import urllib3
 
 
-def dataset_peek(name, ds):
-    print()
-    print("*" * 80)
-    print("@@@ dataset: {}".format(name))
-    print(ds)
-    element = ds.take(1)
-    print("@@@ record type: {}".format(type(element)))
-    for x in element.as_numpy_iterator():
-        print("@@@ x type: {}".format(type(x)))
-        if isinstance(x, list):
-            print("@@@ x is a list")
-            pprint.pprint(x[0])
-        elif isinstance(x, tuple):
-            print("@@@ x is a tuple")
-            pprint.pprint(x)
-        elif isinstance(x, np.ndarray):
-            print("@@@ x is ndarray")
-            pprint.pprint(x[0])
-        else:
-            pprint.pprint(x)
-        break
-    print("*" * 80)
-    print()
-
-
 class TfrsModel(tfrs.Model, ABC):
     def __init__(self, user_model, item_model, loss_task, cached_train_event_ds, cached_test_event_ds):
         super().__init__()
@@ -67,21 +42,14 @@ class TfrsModelMaker(object):
         # Turn off the many Unverified HTTPS request warnings during file downloads.
         urllib3.disable_warnings()
         self.items_ds, self.events_ds = self._load_tf_datasets()
-
-        # dataset_peek("items_ds in init", self.items_ds)
-        # dataset_peek("events_ds in init", self.events_ds)
-
         self.test_events_ds, self.train_events_ds = self._prepare_data()
-        # dataset_peek("train_events_ds in init", self.train_events_ds)
-        # dataset_peek("test_events_ds in init", self.test_events_ds)
+
 
     def create_model(self):
         embedding_dimension = 32
 
         # Define the distribution strategy
         strategy = tf.distribute.MirroredStrategy()
-
-        print(">> Number of devices: {}".format(strategy.num_replicas_in_sync))
 
         with strategy.scope():
             tf.config.set_soft_device_placement(True)
@@ -115,31 +83,13 @@ class TfrsModelMaker(object):
 
             # Metrics
             cands = self.items_ds.batch(128).map(item_model)
-            # print()
-            # print("*" * 80)
-            # print(">> candidates:")
-            # print(cands)
-            # print("*" * 80)
-            # print()
             metrics = tfrs.metrics.FactorizedTopK(candidates=cands)
-            # print()
-            # print("*" * 80)
-            # print(">> metrics:")
-            # print(metrics)
-            # print("*" * 80)
-            # print()
 
             # Loss
             task = tfrs.tasks.Retrieval(metrics=metrics)
 
-            # cached_train_event_ds = self.train_events_ds.batch(8192).cache()
-            # cached_test_event_ds = self.test_events_ds.batch(4096).cache()
-
             cached_train_event_ds = self.train_events_ds.batch(409600).cache()  # 204800
             cached_test_event_ds = self.test_events_ds.batch(204800).cache()  # 102400
-
-            # dataset_peek("cached_train_event_ds in create_model", cached_train_event_ds)
-            # dataset_peek("cached_test_event_ds in create_model", cached_test_event_ds)
 
             # Prevent an auto-sharding related error.
             options = tf.data.Options()
@@ -147,14 +97,9 @@ class TfrsModelMaker(object):
             cached_train_event_ds = cached_train_event_ds.with_options(options)
             cached_test_event_ds = cached_test_event_ds.with_options(options)
 
-            # dataset_peek("cached_train_event_ds in create_model - 2", cached_train_event_ds)
-            # dataset_peek("cached_test_event_ds in create_model - 2", cached_test_event_ds)
-
             model = TfrsModel(user_model, item_model, task, cached_train_event_ds, cached_test_event_ds)
 
             model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1))
-            # model.compile(optimizer=tf.keras.optimizers.Adagrad(learning_rate=0.1), run_eagerly=True)
-            # model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.1))
 
         return model
 
@@ -162,33 +107,12 @@ class TfrsModelMaker(object):
     def train_and_evaluate(model, num_epochs):
         print(">> Training the model...")
 
-        # print()
-        # print("*" * 80)
-        # print(">> cached_train_event_ds:")
-        # print("*" * 80)
-        # i = 1
-        # for x in model.cached_train_event_ds:
-        #     iid = x["item_id"]
-        #     uid = x["user_id"]
-        #     print(">> i: {}, x size: {}, iid size: {}, uid size: {}".format(i, len(x), len(iid), len(uid)))
-        #     i = i + 1
-        # print("*" * 80)
-        # print()
-
         # Train the model
         model.fit(model.cached_train_event_ds, epochs=num_epochs)
         # model.fit(model.cached_train_event_ds, epochs=num_epochs, verbose=0)
         print(">> Training of the model: done.")
 
-        # Evaluate the model
-        print(">> Evaluating the model...")
-        eval_results = model.evaluate(model.cached_test_event_ds, return_dict=True)
-        print(">> Evaluation of the model: done.")
-
-        print()
-        print(f">> Eval results (epochs={num_epochs}):")
-        print(str(eval_results))
-        print()
+        # Evaluate the model...
 
     def _load_tf_datasets(self):
         print(">> Loading TF datasets...")
@@ -250,13 +174,3 @@ class TfrsModelMaker(object):
 
         return test_events_ds, train_events_ds
 
-    @staticmethod
-    def generate_recommendations(model, items_ds):
-        # Making predictions
-
-        # Create a model that takes in raw query features, and
-        index = tfrs.layers.factorized_top_k.BruteForce(model.user_model, k=20)
-        # recommends items out of the entire items dataset.
-        index.index(items_ds.batch(100).map(model.item_model), items_ds)
-
-        # Extract recs for input users ...
