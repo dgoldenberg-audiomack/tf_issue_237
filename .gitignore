@@ -4,8 +4,6 @@ venv
 .idea
 *.pyc
 .minio.sys
-*.zip
-*.gz
 .cache/
 .ipynb_checkpoints/
 **/__pycache__
